@@ -1,8 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  VPC with 4 private subnets spread across 2 Availability Zones (2 subnets per AZ).
-  No NAT Gateway / Internet Gateway is created since all subnets are private-only.
-  Add NAT Gateways in public subnets if outbound internet access is required.
+  VPC with 4 private subnets spread across 2 Availability Zones (2 subnets per AZ),
+  using a single regional NAT Gateway (AvailabilityMode: regional) for outbound
+  internet access. Regional NAT Gateways are VPC-scoped rather than subnet-scoped,
+  so no public subnet is required to host it, and it automatically expands and
+  contracts across whichever AZs your workloads use - giving multi-AZ NAT
+  resilience without per-AZ NAT Gateways, public subnets, or per-AZ route entries.
 
 Parameters:
   VpcCidr:
@@ -41,6 +44,46 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-vpc'
+
+  # --- Internet Gateway ---
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # --- Regional NAT Gateway ---
+  # AvailabilityMode: regional means this NAT Gateway is VPC-scoped, not tied to
+  # a subnet. It automatically expands/contracts to cover whichever AZs your
+  # workloads are running in - no public subnet, and no per-AZ NAT Gateway needed.
+
+  NatGatewayEip:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nat-eip'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AvailabilityMode: regional
+      VpcId: !Ref VPC
+      AllocationId: !GetAtt NatGatewayEip.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-regional-nat-gw'
 
   # --- Subnets: AZ1 ---
 
@@ -86,7 +129,9 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-private-az2-2'
 
-  # --- Route Tables (one per AZ, shared by the two subnets in that AZ) ---
+  # --- Route Tables (one per AZ, shared by the two private subnets in that AZ) ---
+  # Both route 0.0.0.0/0 to the same regional NAT Gateway ID - the NAT Gateway
+  # itself handles routing traffic out via whichever AZ the request originated in.
 
   PrivateRouteTableAz1:
     Type: AWS::EC2::RouteTable
@@ -96,6 +141,13 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-private-rt-az1'
 
+  PrivateRouteAz1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAz1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
   PrivateRouteTableAz2:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -103,6 +155,13 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-private-rt-az2'
+
+  PrivateRouteAz2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAz2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
 
   PrivateSubnet1Az1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -135,6 +194,12 @@ Outputs:
     Value: !Ref VPC
     Export:
       Name: !Sub '${AWS::StackName}-VpcId'
+
+  NatGatewayId:
+    Description: ID of the regional NAT Gateway
+    Value: !Ref NatGateway
+    Export:
+      Name: !Sub '${AWS::StackName}-NatGatewayId'
 
   PrivateSubnet1Az1Id:
     Description: ID of private subnet 1 in AZ1
