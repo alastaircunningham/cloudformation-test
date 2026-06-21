@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  VPC with 4 private subnets spread across 2 Availability Zones (2 subnets per AZ).
+  No NAT Gateway / Internet Gateway is created since all subnets are private-only.
+  Add NAT Gateways in public subnets if outbound internet access is required.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+
+  PrivateSubnet1CidrAz1:
+    Type: String
+    Default: 10.0.0.0/24
+    Description: CIDR block for private subnet 1 in AZ1
+
+  PrivateSubnet2CidrAz1:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for private subnet 2 in AZ1
+
+  PrivateSubnet1CidrAz2:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR block for private subnet 1 in AZ2
+
+  PrivateSubnet2CidrAz2:
+    Type: String
+    Default: 10.0.3.0/24
+    Description: CIDR block for private subnet 2 in AZ2
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  # --- Subnets: AZ1 ---
+
+  PrivateSubnet1Az1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet1CidrAz1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-az1-1'
+
+  PrivateSubnet2Az1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2CidrAz1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-az1-2'
+
+  # --- Subnets: AZ2 ---
+
+  PrivateSubnet1Az2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet1CidrAz2
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-az2-1'
+
+  PrivateSubnet2Az2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2CidrAz2
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-az2-2'
+
+  # --- Route Tables (one per AZ, shared by the two subnets in that AZ) ---
+
+  PrivateRouteTableAz1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-rt-az1'
+
+  PrivateRouteTableAz2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-rt-az2'
+
+  PrivateSubnet1Az1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1Az1
+      RouteTableId: !Ref PrivateRouteTableAz1
+
+  PrivateSubnet2Az1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2Az1
+      RouteTableId: !Ref PrivateRouteTableAz1
+
+  PrivateSubnet1Az2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1Az2
+      RouteTableId: !Ref PrivateRouteTableAz2
+
+  PrivateSubnet2Az2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2Az2
+      RouteTableId: !Ref PrivateRouteTableAz2
+
+Outputs:
+
+  VpcId:
+    Description: ID of the created VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+
+  PrivateSubnet1Az1Id:
+    Description: ID of private subnet 1 in AZ1
+    Value: !Ref PrivateSubnet1Az1
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1Az1Id'
+
+  PrivateSubnet2Az1Id:
+    Description: ID of private subnet 2 in AZ1
+    Value: !Ref PrivateSubnet2Az1
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2Az1Id'
+
+  PrivateSubnet1Az2Id:
+    Description: ID of private subnet 1 in AZ2
+    Value: !Ref PrivateSubnet1Az2
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1Az2Id'
+
+  PrivateSubnet2Az2Id:
+    Description: ID of private subnet 2 in AZ2
+    Value: !Ref PrivateSubnet2Az2
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2Az2Id'
+
+  PrivateSubnetIds:
+    Description: Comma-separated list of all private subnet IDs
+    Value: !Join
+      - ','
+      - - !Ref PrivateSubnet1Az1
+        - !Ref PrivateSubnet2Az1
+        - !Ref PrivateSubnet1Az2
+        - !Ref PrivateSubnet2Az2
